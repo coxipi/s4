@@ -33,6 +33,8 @@ hss=(128) # suggested, not sure what other values would be suitable
 # dropout=0.2
 # epoch=100
 # bs=64 # batch_size
+# prenorm=true # only for S4 currently
+# criterion="CrossEntropy" #"L1" "MSE"
 
 params=()
 for seed in "${seeds[@]}";do

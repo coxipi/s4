@@ -70,8 +70,9 @@ parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('--n_layers', default=4, type=int, help='Number of layers')
 parser.add_argument('--d_model', default=128, type=int, help='Model dimension')
 parser.add_argument('--dropout', default=0.1, type=float, help='Dropout')
-# not implemented with torch's basic deep-RNN
-parser.add_argument('--prenorm', action='store_true', help='Prenorm')
+parser.add_argument('--prenorm', action='store_true', help='Prenorm') # not implemented with torch's basic deep-RNN
+# Criterion
+parser.add_argument('--criterion', default='CrossEntropy', choices=['CrossEntropy', 'MSE','F1'], help='Criterion loss.') # not implemented with torch's basic deep-RNN
 # General
 parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
 
@@ -431,6 +432,12 @@ def setup_optimizer(model, lr, weight_decay, epochs):
         ] + [f"{k} {v}" for k, v in group_hps.items()]))
 
     return optimizer, scheduler
+
+criterion = {
+    "CrossEntropy":nn.CrossEntropyLoss(),
+    "MSE":nn.MSELoss(),
+    "L1":nn.L1Loss(),
+}.get(args.criterion)
 
 criterion = nn.CrossEntropyLoss()
 optimizer, scheduler = setup_optimizer(

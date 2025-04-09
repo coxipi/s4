@@ -343,6 +343,7 @@ class RNNModel(nn.Module):
         x, _ = self.rnn(x)        # (B, L, d_model) -> (B, L, d_model)
         # Instead of having dim(y) = dim(x), we now pool, as in S4
         # Our task is classification and not copy, makes sense 
+        # (L * d_input) = (N*N pixels * 1 grayshade value) -> (d_ouput) = 10 (digits)
         x = x.mean(dim=1)         # (B, d_model) via average pooling over sequence
         x = self.decoder(x)       # (B, d_model) -> (B, d_output)
         return x

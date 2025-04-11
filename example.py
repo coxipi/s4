@@ -25,6 +25,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
+import numpy as np 
+import random
 
 import torchvision
 import torchvision.transforms as transforms
@@ -48,6 +50,10 @@ else:
 
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
+# Seed
+parser.add_argument('--seed', default=1, type=int, help='Seed randomness.')
+# Model
+parser.add_argument('--model', default="S4", type=str, choices=['S4', 'DeepRNN'], help='Model')
 # Optimizer
 parser.add_argument('--lr', default=0.01, type=float, help='Learning rate')
 parser.add_argument('--weight_decay', default=0.01, type=float, help='Weight decay')
@@ -64,7 +70,9 @@ parser.add_argument('--batch_size', default=64, type=int, help='Batch size')
 parser.add_argument('--n_layers', default=4, type=int, help='Number of layers')
 parser.add_argument('--d_model', default=128, type=int, help='Model dimension')
 parser.add_argument('--dropout', default=0.1, type=float, help='Dropout')
-parser.add_argument('--prenorm', action='store_true', help='Prenorm')
+parser.add_argument('--prenorm', action='store_true', help='Prenorm') # not implemented with torch's basic deep-RNN
+# Criterion
+parser.add_argument('--criterion', default='CrossEntropy', choices=['CrossEntropy', 'MSE','F1'], help='Criterion loss.') # not implemented with torch's basic deep-RNN
 # General
 parser.add_argument('--resume', '-r', action='store_true', help='Resume from checkpoint')
 
@@ -74,6 +82,16 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
+# Seeds 
+# There's a manual seed below in `split_train_val`, set at 42. For now I won't touch it.
+def seed_everything(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+seed_everything(args.seed)
 # Data
 print(f'==> Preparing {args.dataset} data..')
 
@@ -220,17 +238,142 @@ class S4Model(nn.Module):
 
         return x
 
+# INCOMPLETE
+# Would this be interesting to implement? 
+# class RNNModel_manual(nn.Module):
+#     """This reproduces the manual stacking of S4 and in the deep-linear-rnn
+#     repo. This is not necessary, but maybe it will be useful. For instance, 
+#     I'm not sure that RNN in torch does this "residual connection", and it 
+#     doesn't allow norm between layers (AFAIU so far)
+#     """
+#     def __init__(
+#         self,
+#         d_input,
+#         d_output=10,
+#         d_model=256,
+#         n_layers=4,
+#         dropout=0.2,
+#         prenorm=False,
+#         rnn_type='RNN'
+#     ):
+#         super().__init__()
+
+#         self.prenorm = prenorm
+#         self.rnn_type = rnn_type.upper()
+
+#         # Linear encoder (e.g., maps 1 → d_model for grayscale)
+#         self.encoder = nn.Linear(d_input, d_model)
+
+#         # Norm + Dropout for each layer
+#         self.norms = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(n_layers)])
+#         self.dropouts = nn.ModuleList([nn.Dropout(dropout) for _ in range(n_layers)])
+
+#         # Use RNN/GRU/LSTM layers stacked manually
+#         rnn_cls = {
+#             'RNN': nn.RNN,
+#             'LSTM': nn.LSTM,
+#             'GRU': nn.GRU
+#         }.get(self.rnn_type)
+
+#         if rnn_cls is None:
+#             raise ValueError(f"Unsupported rnn_type: {rnn_type}")
+
+#         self.rnn_layers = nn.ModuleList([
+#             rnn_cls(input_size=d_model, hidden_size=d_model, num_layers=1, batch_first=True)
+#             for _ in range(n_layers)
+#         ])
+
+#         # Decoder
+#         self.decoder = nn.Linear(d_model, d_output)
+
+#     def forward(self, x):
+#         """
+#         Input x is shape (B, L, d_input)
+#         """
+#         x = self.encoder(x)  # (B, L, d_input) -> (B, L, d_model)
+
+#         for rnn, norm, dropout in zip(self.rnn_layers, self.norms, self.dropouts):
+#             z = x
+#             if self.prenorm:
+#                 z = norm(z)
+
+#             z, _ = rnn(z)  # (B, L, d_model)
+#             z = dropout(z)
+
+#             # Residual connection
+#             x = z + x
+
+#             if not self.prenorm:
+#                 x = norm(x)
+
+#         # Pooling (average over sequence length)
+#         x = x.mean(dim=1)  # (B, d_model)
+
+#         return self.decoder(x)  # (B, d_output)
+
+
+class RNNModel(nn.Module):
+    def __init__(
+        self,
+        d_input,
+        d_output=10,
+        d_model=256,
+        n_layers=4,
+        dropout=0.2,
+    ):
+        super().__init__()
+
+        self.encoder = nn.Linear(d_input, d_model)
+
+        self.rnn = nn.RNN(
+            input_size=d_model,
+            hidden_size=d_model,
+            num_layers=n_layers,
+            dropout=dropout if n_layers > 1 else 0.0,
+            batch_first=True,
+        )
+
+        self.decoder = nn.Linear(d_model, d_output)
+
+    def forward(self, x):
+        """
+        Input: x of shape (B, L, d_input)
+        Output: (B, d_output)
+        """
+        x = self.encoder(x)       # (B, L, d_input) -> (B, L, d_model)
+        x, _ = self.rnn(x)        # (B, L, d_model) -> (B, L, d_model)
+        # Instead of having dim(y) = dim(x), we now pool, as in S4
+        # Our task is classification and not copy, makes sense 
+        # (L * d_input) = (N*N pixels * 1 grayshade value) -> (d_ouput) = 10 (digits)
+        x = x.mean(dim=1)         # (B, d_model) via average pooling over sequence
+        x = self.decoder(x)       # (B, d_model) -> (B, d_output)
+        return x
+
+
+
 # Model
 print('==> Building model..')
-model = S4Model(
-    d_input=d_input,
-    d_output=d_output,
-    d_model=args.d_model,
-    n_layers=args.n_layers,
-    dropout=args.dropout,
-    prenorm=args.prenorm,
-)
-
+if args.model == "S4":
+    model = S4Model(
+        d_input=d_input,
+        d_output=d_output,
+        d_model=args.d_model,
+        n_layers=args.n_layers,
+        dropout=args.dropout,
+        prenorm=args.prenorm,
+    )
+elif args.model == "DeepRNN":
+    model = RNNModel(
+        d_input=d_input,
+        d_output=d_output,
+        d_model=args.d_model,
+        n_layers=args.n_layers,
+        dropout=args.dropout,
+        # I believe `prenorm` is not possible with torch's builtin implementation
+        # prenorm=args.prenorm,
+    )
+else: 
+    raise ValueError(f"Unsupported model: {args.model}. Give either 'S4' or 'DeepRNN'.")
 model = model.to(device)
 if device == 'cuda':
     cudnn.benchmark = True
@@ -289,6 +432,12 @@ def setup_optimizer(model, lr, weight_decay, epochs):
         ] + [f"{k} {v}" for k, v in group_hps.items()]))
 
     return optimizer, scheduler
+
+criterion = {
+    "CrossEntropy":nn.CrossEntropyLoss(),
+    "MSE":nn.MSELoss(),
+    "L1":nn.L1Loss(),
+}.get(args.criterion)
 
 criterion = nn.CrossEntropyLoss()
 optimizer, scheduler = setup_optimizer(

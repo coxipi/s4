@@ -28,6 +28,7 @@ class S4Model(nn.Module):
         d_input,
         d_output=10,
         d_model=256,
+        N = 64,
         n_layers=4,
         dropout=0.1, # changed the default value in the class to reflect the default value in the script
         prenorm=False,
@@ -35,8 +36,8 @@ class S4Model(nn.Module):
     ):
         super(S4Model, self).__init__()
 
-
         self.prenorm = prenorm
+        self.N = N
 
         # Linear encoder (d_input = 1 for grayscale and 3 for RGB)
         self.encoder = nn.Linear(d_input, d_model)
@@ -47,7 +48,7 @@ class S4Model(nn.Module):
         self.dropouts = nn.ModuleList()
         for _ in range(n_layers):
             self.s4_layers.append(
-                S4D(d_model, dropout=dropout, transposed=True, lr=min(0.001,0.01))
+                S4D(d_model, dropout=dropout, d_state=self.N, transposed=True, lr=min(0.001,0.01))
             )
             self.norms.append(nn.LayerNorm(d_model))
             self.dropouts.append(dropout_fn(dropout))

@@ -1,0 +1,67 @@
+defaults:
+  - hydra: default
+  - _self_
+
+save_dir: "logs/"
+seed: 1
+
+logger:
+  _target_: lightning.pytorch.loggers.WandbLogger
+  entity: coxipi-university-of-montreal
+  # entity: guillaume-rabusseau
+  project: s4-drnn-mnist
+  name: ${now:%Y-%m-%d}_${now:%H-%M-%S}
+  save_dir: ${save_dir}
+  offline: True
+  # offline: False
+  # tags:
+  #   - "exp1_p8_seeds"
+
+datamodule:
+  _target_: dataset.MNISTDataModule
+  batch_size: 64
+  num_workers: 4
+  val_split: 0.1 # it was not a choice in original S4
+
+trainer:
+  max_epochs: 100
+  enable_progress_bar: true
+  log_every_n_steps: 1
+  limit_train_batches: 1.0
+  # accelerator: "cpu"
+  accelerator: "auto" # reflects the behaviour of S4 which uses cuda if available
+
+callbacks:
+  early_stopping:
+    _target_: lightning.pytorch.callbacks.EarlyStopping
+    monitor: val_loss
+    patience: 400
+    mode: min
+    verbose: True
+
+
+model: 
+  _target_: model.RNNModel
+  d_input: ${dataset.d_input}
+  d_output: ${dataset.d_output}
+  d_model: 256
+  hidden_size: 256 # by default, S4 has no hidden_size, simply d_model. Leaving this open for RNN
+  n_layers: 4
+  dropout: 0.2
+  lr : ${task.lr} not necessary for RNN
+  prenorm: False not applicable for RNN, for now
+
+task :
+  _target_: task.ClassifyDigits
+  model: ${model}
+  # loss_function : mse_loss
+  lr: 1e-3
+  epochs : ${trainer.max_epochs}
+  weight_decay: 0.01 # useless for RNN
+
+dataset: 
+  # don't change this ... I should organize things differently 
+  name: mnist
+  d_input: 1 # this is not a choice, this comes with the task
+  d_output: 10 # this is not a choice, this comes with the task
+

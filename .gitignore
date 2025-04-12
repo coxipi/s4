@@ -163,7 +163,6 @@ cython_debug/
 lightning_logs/
 logs/
 .vscode/
-src/scripts
 src/data
 *_them
 data/

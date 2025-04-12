@@ -16,7 +16,7 @@ logger:
   #   - "exp1_p8_seeds"
 
 dataset: 
-  name: mnist 
+  name: mnist  # other choice: cifar
   grayscale: true # only true makes sense for mnist
 
 # Dataset switch allows to keep using a single config file. Parameters below 

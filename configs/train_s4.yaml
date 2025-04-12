@@ -15,11 +15,28 @@ logger:
   # tags:
   #   - "exp1_p8_seeds"
 
+dataset: 
+  name: mnist 
+  grayscale: true # only true makes sense for mnist
+
+# Dataset switch allows to keep using a single config file. Parameters below 
+# are constrained given the dataset, don't change them.
+dataset_specs:
+  mnist: 
+    datamodule_target: dataset.MNISTDataModule
+    d_input: 1
+    d_output: 10
+  cifar: 
+    datamodule_target: dataset.CIFAR10DataModule
+    d_input: ${ifelse:${dataset.grayscale},1,3}
+    d_output: 10
+
 datamodule:
-  _target_: dataset.MNISTDataModule
+  _target_: ${dataset_specs.${dataset.name}.datamodule_target}
   batch_size: 64
   num_workers: 4
-  val_split: 0.1 # it was not a choice in original S4
+  val_split: 0.1 
+  grayscale: ${dataset.grayscale}
 
 trainer:
   max_epochs: 100
@@ -39,28 +56,19 @@ callbacks:
 
 model: 
   _target_: model.S4Model
-  d_input: ${dataset.d_input}
-  d_output: ${dataset.d_output}
+  d_input:  ${dataset_specs.${dataset.name}.d_input}
+  d_output: ${dataset_specs.${dataset.name}.d_output}
   d_model: 256
   N: 64 # hidden size in each SSM  
   n_layers: 4
-  dropout: 0.2
+  dropout: 0.1
   lr : ${task.lr} # S4 is a bit special in the way it treats lr, it is also needed to define the model, somehow
   prenorm:  False  # not applicable for RNN, for now
 
-
 task :
-  _target_: task.ClassifyDigits
+  _target_: task.ClassifyTask
   model: ${model}
-  # loss_function : mse_loss
-  lr: 1e-3
+  lr: 0.01
   epochs : ${trainer.max_epochs}
-  weight_decay: 0.01 # useless for RNN
-
-
-dataset: 
-  # don't change this ... I should organize things differently 
-  name: mnist
-  d_input: 1 # this is not a choice, this comes with the task
-  d_output: 10 # this is not a choice, this comes with the task
-
+  weight_decay: 0.0 
+  criterion: "CrossEntropy" # other choices: {MSE, F1}

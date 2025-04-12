@@ -3,10 +3,9 @@ import torch
 from lightning import Trainer, seed_everything
 from omegaconf import OmegaConf
 
-from utils import ast_eval
+from utils import ast_eval, ifelse
 
 # torch.set_float32_matmul_precision("medium")  # or 'high' based on your needs
-
 
 @hydra.main(config_path="../configs/", config_name="train", version_base=None)
 def train(cfg):

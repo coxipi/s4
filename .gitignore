@@ -165,3 +165,5 @@ logs/
 .vscode/
 src/scripts
 src/data
+*_them
+data/

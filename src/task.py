@@ -90,32 +90,32 @@ def setup_optimizer_s4(model, lr, weight_decay, epochs):
     return optimizer, scheduler
 
 
-class ClassifyDigits(LightningModule):
+class ClassifyTask(LightningModule):
     @beartype
     def __init__(
         self,
         model: Any,
         lr: float = 1e-4,
         ignore_index = -1,
-        criterion_type = "CrossEntropy", 
-        epochs = 100, #useless for RNN
+        criterion = "CrossEntropy", 
+        epochs = 100, 
         weight_decay = 0.01, #useless for RNN
     ):
         super().__init__()
         self.model = model
         self.ignore_index = ignore_index
         self.save_hyperparameters()  # ignore the instance of nn.Module that are already stored ignore=['my_module'])
-        # self.automatic_optimization = (model._get_name() != "S4Model")
         self.epochs = epochs
         self.weight_decay = weight_decay
-
-        # why do we invert the arguments tgt and out
-        criterion = {
+        
+        # We could directly ask for loss function instead of passing by
+        # the criterion I wanted to keep the same structure as the s4 repo
+        self.criterion = {
             "CrossEntropy":nn.CrossEntropyLoss(),
             "MSE":nn.MSELoss(),
             "L1":nn.L1Loss(),
-            }.get(criterion_type)
-        self.loss_function = lambda out,tgt : criterion(out,tgt)
+            }.get(criterion)
+        self.loss_function = lambda out,tgt : self.criterion(out,tgt)
 
     @beartype
     def forward(self, x: Tensor) -> Tensor:

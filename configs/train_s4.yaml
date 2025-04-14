@@ -54,6 +54,12 @@ callbacks:
     mode: min
     verbose: True
 
+# Retro-compatibility: Previously we used S4D, the simpler implementation.
+# I think this should equivalent to setting mode == 's4d' or 'diag', but I didn't 
+# study the code in detail. Just to be sure, the simpler implementation remains available. 
+# To use it: 
+# 1. model.S4Model -> model.S4DModel
+# 2. remove the 'mode' key
 model: 
   _target_: model.S4Model
   d_input:  ${dataset_specs.${dataset.name}.d_input}
@@ -63,7 +69,8 @@ model:
   n_layers: 4
   dropout: 0.1
   lr : ${task.lr} # S4 is a bit special in the way it treats lr, it is also needed to define the model, somehow
-  prenorm:  False  # not applicable for RNN, for now
+  prenorm:  False  
+  mode: 'dplr' # <= default. Other choices: {'s4d','diag','s4', 'nplr'}
 
 task :
   _target_: task.ClassifyTask

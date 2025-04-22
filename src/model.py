@@ -2,8 +2,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
+from torch.nn import functional as F
+
 import numpy as np 
 import random
+from typing import Any,Union
 
 import torchvision
 import torchvision.transforms as transforms
@@ -11,6 +14,7 @@ import torchvision.transforms as transforms
 from models.s4.s4 import S4Block as S4  # Can use full version instead of minimal S4D standalone below
 from models.s4.s4d import S4D
 from tqdm.auto import tqdm
+import math
 
 # Dropout broke in PyTorch 1.11
 if tuple(map(int, torch.__version__.split('.')[:2])) == (1, 11):
@@ -97,7 +101,28 @@ class S4Model(nn.Module):
 
         return x
 
-# not sure if
+# Isn't it weird mixing encoding and embedding?
+class S4ModelWithEmbedding(S4Model):
+    def __init__(
+        self,
+        d_input,
+        embedding_dim,
+        d_output=10,
+        d_model=128,
+        n_layers=4,
+        dropout=0.1,
+        prenorm=False,
+        lr=0.01, 
+        mode = 'dplr',
+        padding_idx=None,
+    ):
+        super().__init__(embedding_dim, d_output, d_model, n_layers, dropout, prenorm, lr, mode)
+        self.embedding = nn.Embedding(d_input, embedding_dim, padding_idx=padding_idx)
+
+    def forward(self, x):
+        x = self.embedding(x)
+        return super().forward(x)
+
 class S4DModel(nn.Module):
     def __init__(
         self,
@@ -215,3 +240,21 @@ class RNNModel(nn.Module):
         return x
 
 
+class RNNModelWithEmbedding(RNNModel):
+    def __init__(
+        self,
+        d_input,
+        embedding_dim,
+        d_output=10,
+        d_model=256,
+        hidden_size=256,
+        n_layers=4,
+        dropout=0.1,
+        padding_idx=None,
+    ):
+        super().__init__(embedding_dim, d_output, d_model, n_layers, dropout, prenorm, lr, mode)
+        self.embedding = nn.Embedding(d_input, embedding_dim, padding_idx=padding_idx)
+
+    def forward(self, x):
+        x = self.embedding(x)
+        return super().forward(x)

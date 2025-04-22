@@ -35,7 +35,7 @@ dataset_specs:
 
 datamodule:
   _target_: ${dataset_specs.${dataset.name}.datamodule_target}
-  batch_size: 30
+  batch_size: 64
   num_workers: 4
   val_split: 0.1 
   grayscale: ${dataset.grayscale}
@@ -60,9 +60,9 @@ callbacks:
 model: 
   _target_: model.DeepRNN
   d_input:  ${dataset_specs.${dataset.name}.d_input}
-  embedding_dim: 20  # this replaces d_model (rescale=True means encoding, rescale=False means embedding)
+  embedding_dim: 64  # this replaces d_model (rescale=True means encoding, rescale=False means embedding)
   d_output: ${dataset_specs.${dataset.name}.d_output}
-  hidden_size: 10
+  hidden_size: 32 
   n_layers: 4
   dropout: 0.1
   dropout_between_layers: false # false is like CPRNN (which has no layers anyways), true is like S4

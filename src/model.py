@@ -577,16 +577,210 @@ class DeepCPRNN(nn.Module):
         ]
 
 
+class RNNCellGate(nn.Module):
+    """
+    A linear RNN cell without nonlinearities,
+    similar to PyTorch's RNNCell but with custom activation function.
+
+    Args:
+        input_size: The number of expected features in the input x
+        hidden_size: The number of features in the hidden state h
+        bias: If False, then the layer does not use bias weights b_ih and b_hh
+    """
+
+    def __init__(self, input_size, hidden_size, gate, bias=True):
+        super(RNNCellGate, self).__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.bias = bias
+        self.gate = gate
+
+        # Weight matrices
+        self.weight_ih = nn.Parameter(torch.Tensor(hidden_size, input_size))
+        self.weight_hh = nn.Parameter(torch.Tensor(hidden_size, hidden_size))
+
+        # Optional bias
+        if bias:
+            self.bias_ih = nn.Parameter(torch.Tensor(hidden_size))
+            self.bias_hh = nn.Parameter(torch.Tensor(hidden_size))
+        else:
+            self.register_parameter("bias_ih", None)
+            self.register_parameter("bias_hh", None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        # Use standard initialization method from PyTorch
+        nn.init.xavier_uniform_(self.weight_ih)
+        nn.init.xavier_uniform_(self.weight_hh)
+        if self.bias:
+            nn.init.zeros_(self.bias_ih)
+            nn.init.zeros_(self.bias_hh)
+
+    def forward(self, input, hx=None):
+        """
+        Forward pass of the linear RNN cell.
+
+        Args:
+            input: tensor of shape (batch, input_size) containing input features
+            hx: tensor of shape (batch, hidden_size) containing the initial hidden state
+                or None for zero initial hidden state
+
+        Returns:
+            h': tensor of shape (batch, hidden_size) containing the next hidden state
+        """
+        if hx is None:
+            hx = torch.zeros(
+                input.size(0), self.hidden_size, dtype=input.dtype, device=input.device
+            )
+
+        # Linear transformations
+        h_next = F.linear(input, self.weight_ih, self.bias_ih) + F.linear(
+            hx, self.weight_hh, self.bias_hh
+        )
+
+        # Activation function (gate)
+        h_next = self.gate(h_next)
+        return h_next
+
+
+class DeepRNN(nn.Module):
+    def __init__(
+        self,
+        d_input,
+        embedding_dim,
+        d_output,
+        hidden_size,
+        n_layers,
+        batch_first: bool = True,
+        dropout: float = 0.1,
+        dropout_between_layers: bool = False,
+        activation="relu",
+        readout_activation="identity",
+        gate="identity",
+        rescale: bool = True,
+    ):
+        super(DeepRNN, self).__init__()
+
+        self.dropout = dropout
+        self.dropout_between_layers = dropout_between_layers
+        self.batch_first = batch_first
+        self.embedding_dim = embedding_dim
+        self.hidden_size = hidden_size
+        self.rescale = rescale
+        self.d_input = d_input if self.rescale else d_input * 256
+        self.d_output = d_output
+        self.n_layers = n_layers
+
+        if activation == "relu":
+            self.activation_fn = F.relu
+        elif activation == "tanh":
+            self.activation_fn = torch.tanh
+        elif activation == "identity":
+            self.activation_fn = lambda x: x
+        else:
+            raise ValueError("activation must be 'relu', 'tanh', or 'identity'")
+
+        if readout_activation == "relu":
+            self.readout_activation_fn = F.relu
+        elif readout_activation == "tanh":
+            self.readout_activation_fn = torch.tanh
+        elif readout_activation == "identity":
+            self.readout_activation_fn = lambda x: x
+        else:
+            raise ValueError("readout_activation must be 'relu', 'tanh', or 'identity'")
+
+        self.gate = {
+            "tanh": torch.tanh,
+            "sigmoid": torch.sigmoid,
+            "identity": lambda x: x,
+        }[gate]
+
+        # Define embedding and decoder layers
+        if self.rescale:
+            self.embedding = nn.Linear(self.d_input, self.embedding_dim)
+        else:
+            self.embedding = nn.Embedding(self.d_input, self.embedding_dim)
+
+        self.rnn_cell = RNNCellGate
+
+        self.rnn_layers = nn.ModuleList(
+            [
+                self.rnn_cell(
+                    self.embedding_dim if i == 0 else self.hidden_size,
+                    self.hidden_size,
+                    gate=self.gate,
+                )
+                for i in range(self.n_layers)
+            ]
+        )
+        self.decoder = nn.Linear(self.hidden_size, self.d_output)
+
+    def forward(self, x, init_states=None):
+        if self.batch_first:
+            x = x.transpose(0, 1)
+        x = self.embedding(x)
+        seq_length, batch_size, _ = x.size()
+        device = x.device
+        if init_states is None:
+            h = self.init_hidden(batch_size, device)
+            init_states = h
+        else:
+            h = init_states
+            h = [h_t.to(device) for h_t in h]
+
+        outputs = []
+
+        for t in range(seq_length):
+            out, h = self.forward_one_timestep(x[t], h)
+            outputs.append(out)
+
+        outputs = torch.stack(outputs, dim=0)
+        outputs = outputs.contiguous()
+        # This reproduces CPRNN behaviour: Dropout after last layer, after stacking
+        # just before decoding
+        if not self.dropout_between_layers:
+            outputs = nn.Dropout(self.dropout)(outputs)
+        outputs = self.decoder(outputs)
+
+        if self.batch_first:
+            outputs = outputs.transpose(0, 1)
+        outputs = outputs.mean(dim=1)  # (B, d_model) via average pooling over sequence
+        return outputs, init_states
+
+    def forward_one_timestep(self, x, h):
+        h_depth = []
+        h_rec = []
+        for i, rnn in enumerate(self.rnn_layers):
+            h_i = rnn(x if i == 0 else h_depth[i - 1], h[i])
+            h_rec.append(h_i)
+            h_i = self.activation_fn(h_i)
+            if self.dropout_between_layers:
+                h_i = nn.Dropout(self.dropout)(h_i)
+            h_depth.append(h_i)
+        out = h_depth[-1]
+        out = self.readout_activation_fn(out)
+
+        return out, torch.stack(h_rec)
+
+    def init_hidden(self, batch_size, device=torch.device("cpu")):
+        return [
+            torch.zeros(batch_size, self.hidden_size).to(device)
+            for _ in range(self.n_layers)
+        ]
+
+
 # if __name__ == "__main__":
 #     # Example usage
-#     vocab_size = 100
-#     input_size = 50
+#     d_input = 1
+#     embedding_dim = 30
+#     d_output = 10
 #     hidden_size = 128
-#     rank = 8
+#     n_layers = 4
 #     batch_size = 32
 #     seq_len = 10
 
-#     model = CPRNN(input_size, hidden_size, vocab_size, rank=rank)
-#     x = torch.randint(0, vocab_size, (batch_size, seq_len))
+#     model = DeepRNN(d_input, embedding_dim, d_output, hidden_size, n_layers)
+#     x = torch.randint(0, d_input, (batch_size, seq_len)).float()
 #     output = model(x)
 #     print(output.shape)  # Should be [batch_size, seq_len, vocab_size]
